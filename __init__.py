@@ -5,11 +5,11 @@ from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 bl_info = {
     'name': 'Multi object shape key',
-    'category': 'Object', # Changed category to Object as it deals with object selection
+    'category': 'Object',
     'author': 'Taremin',
     'location': 'Propaties > Data > Multi Object Shapekey',
     'description': "",
-    'version': (0, 0, 2),
+    'version': (0, 0, 3),
     'blender': (2, 80, 0),
     'wiki_url': '',
     'tracker_url': '',
