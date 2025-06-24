@@ -17,6 +17,11 @@ bl_info = {
 }
 
 
+def get_settings(context):
+    """Get the addon's settings for the current scene."""
+    return context.scene.taremin_mos
+
+
 class TareminMultiObjectShapekeyProperty(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty(name="ShapeKeyName")
     value: bpy.props.FloatProperty(
@@ -31,6 +36,16 @@ class TareminMultiObjectShapekeyProperty(bpy.types.PropertyGroup):
                 continue
             block = obj.data.shape_keys.key_blocks[index]
             block.value = value
+
+
+class MOS_SelectionPreset(bpy.types.PropertyGroup):
+    """Group of properties for a single preset."""
+    name: bpy.props.StringProperty(name="Preset Name", default="Preset")
+    object_names: bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
+
+    def add_object(self, name):
+        item = self.object_names.add()
+        item.name = name
 
 
 class TareminMultiObjectShapekeyProps(bpy.types.PropertyGroup):
@@ -60,6 +75,9 @@ class TareminMultiObjectShapekeyProps(bpy.types.PropertyGroup):
         description="Toggle visibility of selected preset's object list",
         default=True
     )
+    # Preset settings are now stored per-scene
+    presets: bpy.props.CollectionProperty(type=MOS_SelectionPreset)
+    active_preset_index: bpy.props.IntProperty()
 
 
 class PROPERTIES_UL_TareminMultiObjectShapekeyList(bpy.types.UIList):
@@ -73,7 +91,7 @@ class PROPERTIES_OT_UpdateShapekeys(bpy.types.Operator):
     bl_label = 'update'
 
     def execute(self, context):
-        settings = context.scene.taremin_mos
+        settings = get_settings(context)
         collection = settings.collection
         collection.clear()
 
@@ -85,7 +103,7 @@ class PROPERTIES_OT_UpdateShapekeys(bpy.types.Operator):
         return {'FINISHED'}
 
     def get_shapekeys(self, context):
-        settings = context.scene.taremin_mos
+        settings = get_settings(context)
 
         # 処理対象のメッシュオブジェクトをフィルタリング
         target_objects = [
@@ -137,7 +155,7 @@ class PROPERTIES_OT_ClearShapekeys(bpy.types.Operator):
     bl_label = 'update'
 
     def execute(self, context):
-        settings = context.scene.taremin_mos
+        settings = get_settings(context)
         settings.collection.clear()
         return {'FINISHED'}
 
@@ -161,21 +179,11 @@ class PROPERTIES_OT_SetAllShapekeyValues(bpy.types.Operator):
         return f"Set all listed shape key values to {properties.value}"
 
     def execute(self, context):
-        settings = context.scene.taremin_mos
+        settings = get_settings(context)
         for item in settings.collection:
             # item.valueを更新すると、登録したupdate関数が自動で呼ばれる
             item.value = self.value
         return {'FINISHED'}
-
-
-class MOS_SelectionPreset(bpy.types.PropertyGroup):
-    """Group of properties for a single preset."""
-    name: bpy.props.StringProperty(name="Preset Name", default="Preset")
-    object_names: bpy.props.CollectionProperty(type=bpy.types.PropertyGroup)
-
-    def add_object(self, name):
-        item = self.object_names.add()
-        item.name = name
 
 
 class MOS_UL_PresetList(bpy.types.UIList):
@@ -204,7 +212,7 @@ class MOS_OT_AddPreset(bpy.types.Operator):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
+        settings = get_settings(context)
         selected_objs = [
             obj.name for obj in context.selected_objects if obj.type == 'MESH']
 
@@ -216,12 +224,12 @@ class MOS_OT_AddPreset(bpy.types.Operator):
             self.report({'WARNING'}, "Preset name cannot be empty")
             return {'CANCELLED'}
 
-        new_preset = prefs.presets.add()
+        new_preset = settings.presets.add()
         new_preset.name = self.preset_name
         for obj_name in selected_objs:
             new_preset.add_object(obj_name)
 
-        prefs.active_preset_index = len(prefs.presets) - 1
+        settings.active_preset_index = len(settings.presets) - 1
         return {'FINISHED'}
 
 
@@ -234,15 +242,15 @@ class MOS_OT_RemovePreset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        prefs = context.preferences.addons[__name__].preferences
-        return prefs.presets
+        settings = get_settings(context)
+        return settings.presets
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
-        index = prefs.active_preset_index
-        prefs.presets.remove(index)
-        prefs.active_preset_index = min(
-            max(0, index - 1), len(prefs.presets) - 1)
+        settings = get_settings(context)
+        index = settings.active_preset_index
+        settings.presets.remove(index)
+        settings.active_preset_index = min(
+            max(0, index - 1), len(settings.presets) - 1)
         return {'FINISHED'}
 
 
@@ -263,15 +271,15 @@ class MOS_OT_LoadPreset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        prefs = context.preferences.addons[__name__].preferences
-        return prefs.presets
+        settings = get_settings(context)
+        return settings.presets
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
-        if not prefs.presets or prefs.active_preset_index >= len(prefs.presets):
+        settings = get_settings(context)
+        if not settings.presets or settings.active_preset_index >= len(settings.presets):
             return {'CANCELLED'}
 
-        preset = prefs.presets[prefs.active_preset_index]
+        preset = settings.presets[settings.active_preset_index]
         object_names = [obj.name for obj in preset.object_names]
 
         if self.mode == 'REPLACE':
@@ -306,19 +314,19 @@ class MOS_OT_MovePreset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        prefs = context.preferences.addons[__name__].preferences
-        return prefs.presets and 0 <= prefs.active_preset_index < len(prefs.presets)
+        settings = get_settings(context)
+        return settings.presets and 0 <= settings.active_preset_index < len(settings.presets)
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
-        index = prefs.active_preset_index
+        settings = get_settings(context)
+        index = settings.active_preset_index
 
         if self.direction == 'UP' and index > 0:
-            prefs.presets.move(index, index - 1)
-            prefs.active_preset_index -= 1
-        elif self.direction == 'DOWN' and index < len(prefs.presets) - 1:
-            prefs.presets.move(index, index + 1)
-            prefs.active_preset_index += 1
+            settings.presets.move(index, index - 1)
+            settings.active_preset_index -= 1
+        elif self.direction == 'DOWN' and index < len(settings.presets) - 1:
+            settings.presets.move(index, index + 1)
+            settings.active_preset_index += 1
         return {'FINISHED'}
 
 
@@ -333,12 +341,12 @@ class MOS_OT_RemoveObjectFromPreset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        prefs = context.preferences.addons[__name__].preferences
-        return prefs.presets and 0 <= prefs.active_preset_index < len(prefs.presets)
+        settings = get_settings(context)
+        return settings.presets and 0 <= settings.active_preset_index < len(settings.presets)
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
-        preset = prefs.presets[prefs.active_preset_index]
+        settings = get_settings(context)
+        preset = settings.presets[settings.active_preset_index]
         for i, obj in enumerate(preset.object_names):
             if obj.name == self.object_name:
                 preset.object_names.remove(i)
@@ -356,13 +364,13 @@ class MOS_OT_AddSelectedToPreset(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        prefs = context.preferences.addons[__name__].preferences
+        settings = get_settings(context)
         # Can run if there are selected objects and an active preset
-        return context.selected_objects and prefs.presets and 0 <= prefs.active_preset_index < len(prefs.presets)
+        return context.selected_objects and settings.presets and 0 <= settings.active_preset_index < len(settings.presets)
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
-        preset = prefs.presets[prefs.active_preset_index]
+        settings = get_settings(context)
+        preset = settings.presets[settings.active_preset_index]
 
         added_count = 0
         for obj in context.selected_objects:
@@ -397,10 +405,10 @@ class MOS_OT_ExportPresets(bpy.types.Operator, ExportHelper):
     )
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
+        settings = get_settings(context)
 
         presets_data = []
-        for preset in prefs.presets:
+        for preset in settings.presets:
             presets_data.append({
                 "name": preset.name,
                 "object_names": [obj.name for obj in preset.object_names],
@@ -439,7 +447,7 @@ class MOS_OT_ImportPresets(bpy.types.Operator, ImportHelper):
     )
 
     def execute(self, context):
-        prefs = context.preferences.addons[__name__].preferences
+        settings = get_settings(context)
 
         try:
             # Use 'utf-8-sig' to correctly handle UTF-8 files with or without a BOM (Byte Order Mark),
@@ -462,9 +470,9 @@ class MOS_OT_ImportPresets(bpy.types.Operator, ImportHelper):
             return {'CANCELLED'}
 
         if self.overwrite:
-            prefs.presets.clear()
+            settings.presets.clear()
 
-        existing_names = {p.name for p in prefs.presets}
+        existing_names = {p.name for p in settings.presets}
         imported_count = 0
         for preset_data in presets_data:            
             name = preset_data.get("name")
@@ -476,7 +484,7 @@ class MOS_OT_ImportPresets(bpy.types.Operator, ImportHelper):
                 continue
 
             if name not in existing_names:
-                new_preset = prefs.presets.add()
+                new_preset = settings.presets.add()
                 new_preset.name = name
                 for obj_name in obj_names:
                     new_preset.add_object(obj_name)
@@ -490,12 +498,10 @@ class MOS_OT_ImportPresets(bpy.types.Operator, ImportHelper):
 class MultiObjectShapekeyAddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
-    presets: bpy.props.CollectionProperty(type=MOS_SelectionPreset)
-    active_preset_index: bpy.props.IntProperty()
-
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Presets are managed in the Properties Panel (N-Panel).")
+        layout.label(text="This addon has no user preferences.")
+        layout.label(text="All settings and presets are stored within the .blend file.")
 
 
 class PROPERTIES_PT_TareminPanel(bpy.types.Panel):
@@ -512,7 +518,7 @@ class PROPERTIES_PT_TareminPanel(bpy.types.Panel):
         )
 
     def draw(self, context):
-        settings = context.scene.taremin_mos
+        settings = get_settings(context)
         layout = self.layout
 
         # Collapsible box for selected objects
@@ -561,12 +567,10 @@ class PROPERTIES_PT_TareminPanel(bpy.types.Panel):
                  icon="TRIA_DOWN" if settings.show_presets else "TRIA_RIGHT")
 
         if settings.show_presets:
-            prefs = context.preferences.addons[__name__].preferences
-
             row = box.row()
             row.template_list("MOS_UL_PresetList", "",
-                              prefs, "presets",
-                              prefs, "active_preset_index")
+                              settings, "presets",
+                              settings, "active_preset_index")
 
             col = row.column(align=True)
             col.operator(MOS_OT_AddPreset.bl_idname, icon='ADD', text="")
@@ -592,8 +596,8 @@ class PROPERTIES_PT_TareminPanel(bpy.types.Panel):
             op_add.mode = 'ADD'
             
             # --- Selected Preset Details UI ---
-            if prefs.presets and prefs.active_preset_index < len(prefs.presets):
-                selected_preset = prefs.presets[prefs.active_preset_index]
+            if settings.presets and settings.active_preset_index < len(settings.presets):
+                selected_preset = settings.presets[settings.active_preset_index]
                 
                 details_box = box.box() # Use a new box for the details section
                 details_row = details_box.row()
@@ -622,14 +626,17 @@ class PROPERTIES_PT_TareminPanel(bpy.types.Panel):
 
 
 classesToRegister = [
+    # PropertyGroup classes that are types for other properties
+    TareminMultiObjectShapekeyProperty,
+    MOS_SelectionPreset,
+    TareminMultiObjectShapekeyProps, # This now depends on the two above
+
+    # UIList classes
     PROPERTIES_PT_TareminPanel,
     PROPERTIES_OT_UpdateShapekeys,
     PROPERTIES_OT_ClearShapekeys,
     PROPERTIES_OT_SetAllShapekeyValues,
     PROPERTIES_UL_TareminMultiObjectShapekeyList,
-    TareminMultiObjectShapekeyProperty,
-    TareminMultiObjectShapekeyProps,
-    MOS_SelectionPreset,
     MOS_UL_PresetList,
     MOS_OT_AddPreset,
     MOS_OT_RemovePreset,
@@ -639,13 +646,13 @@ classesToRegister = [
     MOS_OT_AddSelectedToPreset,
     MOS_OT_ExportPresets,
     MOS_OT_ImportPresets,
-    MultiObjectShapekeyAddonPreferences,
 ]
 
 
 def register():
     for value in classesToRegister:
         bpy.utils.register_class(value)
+    # Assign the PointerProperty. If it already exists, it will be overwritten.
     bpy.types.Scene.taremin_mos = bpy.props.PointerProperty(
         type=TareminMultiObjectShapekeyProps)
 
@@ -655,6 +662,7 @@ def unregister():
         bpy.utils.unregister_class(value)
     del bpy.types.Scene.taremin_mos
     Path(__file__).touch()
+
 
 
 if __name__ == '__main__':
